@@ -1,0 +1,174 @@
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Аеродроми України</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+
+    .bottom-panel {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background-color: #121212;
+      color: white;
+      padding: 20px 15px;
+      text-align: center;
+      z-index: 1000;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
+    }
+
+    .bottom-panel h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      color: #f0f0f0;
+    }
+
+    .bottom-panel input[type="text"] {
+      padding: 10px 14px;
+      border: 1px solid #444;
+      border-radius: 20px;
+      background-color: #1f1f1f;
+      color: #fff;
+      width: 160px;
+      margin-right: 10px;
+      outline: none;
+    }
+
+    .bottom-panel input[type="text"]::placeholder {
+      color: #aaa;
+    }
+
+    .bottom-panel button {
+      padding: 10px 18px;
+      background-color: #007bff;
+      border: none;
+      color: white;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .bottom-panel button:hover {
+      background-color: #0056b3;
+    }
+
+    .error-msg {
+      margin-top: 10px;
+      color: #ff5c5c;
+    }
+
+    .label-text {
+      background-color: rgba(0, 0, 0, 0.7);
+      padding: 6px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      text-align: center;
+      display: inline-block;
+      white-space: nowrap;
+      max-width: 200px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="bottom-panel">
+    <h3>Знайти аеродром за кодом</h3>
+    <input type="text" id="airfieldCodeInput" placeholder="Напр. UKLL" />
+    <button onclick="searchAirfield()">Пошук</button>
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    let map;
+    let airfields = [];
+
+    function showMap(userLat, userLon) {
+      map = L.map('map').setView([userLat, userLon], 8);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; CartoDB', subdomains: 'abcd'
+      }).addTo(map);
+
+      L.marker([userLat, userLon])
+        .addTo(map)
+        .bindPopup("Ви тут 🧭")
+        .openPopup();
+
+      const airfieldIcon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+
+      airfields.forEach(field => {        L.marker([field.lat + 0.03, field.lon], {
+          icon: L.divIcon({
+            className: 'label-text',
+            html: field.name,
+            iconAnchor: [0, 0]
+          })
+        }).addTo(map);
+      });
+    }
+
+    function searchAirfield() {
+      const input = document.getElementById('airfieldCodeInput').value.trim().toUpperCase();
+      const errorMsg = document.getElementById('errorMsg');
+      errorMsg.textContent = '';
+
+      const match = airfields.find(a => a.code === input);
+      if (match && map) {
+        map.setView([match.lat, match.lon], 12);
+        L.popup()
+          .setLatLng([match.lat, match.lon])
+          .setContent(`Знайдено: ${match.name}`)
+          .openOn(map);
+      } else {
+        errorMsg.textContent = 'Аеродром не знайдено або код некоректний.';
+      }
+    }
+
+    fetch('airfields.json')
+      .then(response => response.json())
+      .then(data => {
+        airfields = data;
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              const { latitude, longitude } = position.coords;
+              showMap(latitude, longitude);
+            },
+            (error) => alert("Помилка визначення місця: " + error.message)
+          );
+        } else {
+          alert("Ваш браузер не підтримує геолокацію.");
+        }
+      })
+      .catch(err => {
+        alert("Помилка завантаження списку аеродромів.");
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
