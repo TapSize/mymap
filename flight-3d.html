@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3D · Полёт по коробочке</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#08131d;color:#dcecf5;font:14px 'Segoe UI',Arial,sans-serif;overflow:hidden}canvas{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}.top{position:absolute;top:22px;left:26px;right:26px;display:flex;align-items:flex-start;justify-content:space-between;gap:20px;pointer-events:none}h1{font-size:22px;font-weight:500;margin:5px 0}.eyebrow{font-size:10px;letter-spacing:2px;color:#79b4d1}.subtitle{font-size:11px;color:#91aaba;line-height:1.7}.hud{position:absolute;top:114px;left:26px;width:220px;padding:17px;background:#102330e8;border:1px solid #294555;border-radius:8px;pointer-events:none}.hud label{display:block;color:#8eacbe;font-size:10px;letter-spacing:1px;margin:14px 0 4px}.hud label:first-child{margin-top:0}.hud strong{font:24px Consolas,monospace}.hud small{font-size:12px;color:#a8c6d7}.phase{position:absolute;top:24px;right:26px;padding:12px 18px;background:#163449dd;border:1px solid #32627b;border-radius:5px;font-size:13px}.bottom{position:absolute;bottom:18px;left:26px;right:26px;background:#102330ef;border:1px solid #294555;border-radius:8px;padding:15px 18px}.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button,select{font:13px 'Segoe UI',sans-serif;background:#1c3b4e;color:#dcecf5;border:1px solid #416276;border-radius:4px;padding:8px 12px;cursor:pointer}button:hover{background:#28526a}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #72b8df;outline-offset:3px}.primary{background:#267599;border-color:#388cae}input[type=range]{accent-color:#6ed1f6;flex:1;min-width:120px}.clock{font:14px Consolas,monospace;min-width:130px}.notice{font-size:11px;color:#e2bd8c;line-height:1.6;margin-top:10px;max-width:1100px}.error{position:absolute;inset:0;display:grid;place-content:center;background:#08131d;padding:40px;white-space:pre-line;line-height:1.8}.error[hidden]{display:none}@media(max-width:650px){.hud{top:110px;left:12px;width:160px;padding:12px}.hud strong{font-size:19px}.top{left:12px;top:12px}.phase{top:70px;right:12px;font-size:11px}.bottom{left:12px;right:12px;bottom:12px;padding:10px}.subtitle{max-width:260px}.clock{font-size:12px;min-width:110px}.hud label{margin:9px 0 3px}}
+</style></head><body>
+<canvas id="scene" aria-label="Трёхмерная анимация вертолёта по заданному маршруту"></canvas>
+<div class="top"><div><div class="eyebrow">УЧЕБНЫЙ ПОЛЁТ / 3D</div><h1>Левая коробочка</h1><div class="subtitle">Перетаскивайте сцену для поворота камеры · колесо — масштаб<br>Высоты над ВПП · штиль · модель вертолёта увеличена для видимости</div></div></div>
+<div id="phase" class="phase">Подготовка</div>
+<div class="hud"><label>ВЫСОТА НАД ВПП</label><strong id="alt">—</strong><label>СКОРОСТЬ</label><strong id="speed">—</strong><label>МАГНИТНЫЙ КУРС</label><strong id="heading">—</strong><label>ВЕРТИКАЛЬНАЯ СКОРОСТЬ</label><strong id="vertical">—</strong><label>КРЕН</label><strong id="bank">—</strong><label>ОСТАЛОСЬ</label><small id="remaining">—</small></div>
+<div class="bottom"><div class="controls"><button id="pause" class="primary">❚❚ Пауза</button><button id="restart">↺ Сначала</button><select id="rate" aria-label="Скорость воспроизведения"><option value="1">1×</option><option value="5">5×</option><option value="10" selected>10×</option><option value="30">30×</option><option value="60">60×</option></select><button id="view">Вид сверху</button><input id="timeline" type="range" min="0" max="1" value="0" step="0.1" aria-label="Время полёта"/><span id="clock" class="clock">0:00 / 0:00</span></div><div id="notice" class="notice"></div></div>
+<div id="error" class="error" hidden></div>
+<script src="flight-model.js"></script>
+<script>
+const $=id=>document.getElementById(id),canvas=$('scene'),ctx=canvas.getContext('2d');
+let plan;
+try{if(!location.hash.slice(1))throw Error('Откройте основную схему circuit.html, задайте параметры и нажмите «Play · 3D».');plan=FlightModel.build(JSON.parse(decodeURIComponent(location.hash.slice(1))));if(plan.issues.length)throw Error(plan.issues.join('\n'));}
+catch(error){$('error').hidden=false;$('error').textContent=error.message;}
+if(plan){
+ const bounds=plan.bounds,center={x:(bounds.minX+bounds.maxX)/2,y:(bounds.minY+bounds.maxY)/2,z:bounds.maxZ/3},extent=Math.max(bounds.maxX-bounds.minX,bounds.maxY-bounds.minY,1000),modelScale=Math.max(18,extent/125);
+ const units=plan.config.units||{},fmt=t=>`${Math.floor(Math.round(t)/60)}:${String(Math.round(t)%60).padStart(2,'0')}`;
+ let w=1,h=1,time=0,last=null,playing=true,yaw=-.7,pitch=.76,zoom=1,top=false,drag=null;
+ let camera,forward,right,up,focal;
+ const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z}),dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z,cross=(a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x}),norm=a=>{const n=Math.hypot(a.x,a.y,a.z);return{x:a.x/n,y:a.y/n,z:a.z/n};};
+ function setupCamera(){const distance=extent*1.55/zoom;camera={x:center.x+Math.cos(yaw)*Math.cos(pitch)*distance,y:center.y+Math.sin(yaw)*Math.cos(pitch)*distance,z:center.z+Math.sin(pitch)*distance};forward=norm(sub(center,camera));right=norm(cross(forward,{x:0,y:0,z:1}));up=cross(right,forward);focal=Math.min(w,h)*1.12;}
+ function project(p){const v=sub(p,camera),depth=dot(v,forward);if(depth<=1)return null;return{x:w*.54+dot(v,right)*focal/depth,y:h*.46-dot(v,up)*focal/depth,depth};}
+ function line(points,color,width=1,dash=[]){ctx.beginPath();let started=false;for(const p of points){const q=project(p);if(!q){started=false;continue;}if(!started){ctx.moveTo(q.x,q.y);started=true;}else ctx.lineTo(q.x,q.y);}ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dash);ctx.stroke();ctx.setLineDash([]);}
+ function polygon(points,color,stroke){const ps=points.map(project);if(ps.some(p=>!p))return;ctx.beginPath();ps.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fillStyle=color;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.stroke();}}
+ function label(p,text,color='#99b8cb'){const q=project(p);if(!q)return;ctx.font='12px Segoe UI, sans-serif';const tw=ctx.measureText(text).width;ctx.fillStyle='#0a1a24cc';ctx.fillRect(q.x-5,q.y-16,tw+10,21);ctx.fillStyle=color;ctx.fillText(text,q.x,q.y);}
+ const turnStarts=plan.segments.filter(s=>s.type==='turn').map(s=>plan.sample(s.start));
+ const beaconLeg=plan.segments.find(s=>s.type==='leg'&&s.index===6),beacon={x:beaconLeg.x,y:beaconLeg.y,z:0};
+ $('timeline').max=String(plan.total);
+ $('notice').textContent='Взлёт и посадка — одна точка ВПП. Набор: ВПП → H1 → H2. Снижение: H3 → H4 → ВПП. Высоты H1–H4 выдерживаются на соответствующих разворотах; между H2 и H3 выполняется переход к заданной H3. Вертикальная скорость адаптируется автоматически: ΔH / t. Геометрия замкнута.';
+ function resize(){const ratio=Math.min(devicePixelRatio||1,2);w=innerWidth;h=innerHeight;canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);}
+ addEventListener('resize',resize);resize();
+ function helicopter(state,now){
+  const size=modelScale,roll=-state.bank*Math.PI/180,pitchAngle=Math.atan2(state.vz,state.speed/3.6);
+  function local(x,y,z){let px=x*Math.cos(pitchAngle)-z*Math.sin(pitchAngle),pz=x*Math.sin(pitchAngle)+z*Math.cos(pitchAngle),py=y*Math.cos(roll)-pz*Math.sin(roll);pz=y*Math.sin(roll)+pz*Math.cos(roll);return{x:state.x+(px*Math.cos(state.heading)-py*Math.sin(state.heading))*size,y:state.y+(px*Math.sin(state.heading)+py*Math.cos(state.heading))*size,z:state.z+(pz+.5)*size};}
+  const vertices=[[1.05,0,0],[.45,-.43,-.22],[-.62,-.35,-.2],[-.82,0,.15],[-.62,.35,-.2],[.45,.43,-.22],[.55,-.31,.42],[.55,.31,.42],[-.48,0,.5]].map(v=>local(...v));
+  const faces=[{i:[0,1,6],c:'#bceafa'},{i:[0,7,5],c:'#8dc8df'},{i:[6,7,0],c:'#d7f5ff'},{i:[1,2,8,6],c:'#27658a'},{i:[5,7,8,4],c:'#3986a6'},{i:[2,3,4,8],c:'#1a4669'},{i:[6,8,7],c:'#65b6d1'}];
+  faces.filter(f=>f.i.every(i=>project(vertices[i]))).sort((a,b)=>b.i.reduce((s,i)=>s+project(vertices[i]).depth,0)/b.i.length-a.i.reduce((s,i)=>s+project(vertices[i]).depth,0)/a.i.length).forEach(f=>polygon(f.i.map(i=>vertices[i]),f.c,'#a2def33a'));
+  line([local(-.6,0,.05),local(-2.25,0,.25)],'#63a9c9',4);line([local(-2.25,-.45,.25),local(-2.25,.45,.25)],'#b3dfed',2);
+  [-.48,.48].forEach(y=>{line([local(-.65,y,-.48),local(.75,y,-.48)],'#d3e7ef',2);line([local(-.35,y,-.48),local(-.35,y*.6,-.12)],'#91bdcf',1.5);});
+  line([local(0,0,.3),local(0,0,.9)],'#bdd7e4',2);
+  const rotor=now*.028;for(let a=0;a<2;a++){const r=rotor+a*Math.PI/2;line([local(-2.3*Math.cos(r),-2.3*Math.sin(r),.92),local(2.3*Math.cos(r),2.3*Math.sin(r),.92)],'#c7eaf4d9',2.5);}
+  line([{x:state.x,y:state.y,z:0},{x:state.x,y:state.y,z:state.z}],'#74cde147',1,[4,5]);
+ }
+ function draw(now){
+  setupCamera();const gradient=ctx.createLinearGradient(0,0,0,h);gradient.addColorStop(0,'#08131e');gradient.addColorStop(1,'#112b3a');ctx.fillStyle=gradient;ctx.fillRect(0,0,w,h);
+  const step=extent>12000?2000:extent>6000?1000:500,radius=extent*.85;
+  for(let i=-10;i<=10;i++){const a=i*step;line([{x:center.x-radius,y:center.y+a,z:0},{x:center.x+radius,y:center.y+a,z:0}],'#28475666');line([{x:center.x+a,y:center.y-radius,z:0},{x:center.x+a,y:center.y+radius,z:0}],'#28475666');}
+  const heading=Math.PI/2-plan.config.course*Math.PI/180;
+  function runway(x,y){return{x:x*Math.cos(heading)-y*Math.sin(heading),y:x*Math.sin(heading)+y*Math.cos(heading),z:2};}
+  polygon([runway(-400,-24),runway(400,-24),runway(400,24),runway(-400,24)],'#627482','#9cbbca');line([runway(-360,0),runway(360,0)],'#e3edf3',1.5,[12,8]);label(runway(440,20),'ВПП · '+String(plan.config.course).padStart(3,'0')+'°');
+  line(plan.points.map(p=>({x:p.x,y:p.y,z:0})),'#385b6c',1.5,[4,6]);
+  for(const p of turnStarts){line([beacon,{x:p.x,y:p.y,z:0}],'#426b7d66',1,[5,6]);line([{x:p.x,y:p.y,z:0},p],'#6696af99',1,[4,4]);}
+  const q=project(beacon);if(q){ctx.beginPath();ctx.moveTo(q.x,q.y-9);ctx.lineTo(q.x-7,q.y+5);ctx.lineTo(q.x+7,q.y+5);ctx.closePath();ctx.fillStyle='#f4cb7e';ctx.fill();}label({...beacon,z:50},'Радиомаяк','#efcb83');
+  line(plan.points,'#5aa7c166',2);line(plan.points.filter(p=>p.time<=time),'#68d8fa',3);
+  turnStarts.forEach((p,i)=>label({...p,z:p.z+60},`${i+1} · H ${Math.round(units.altitude==='ft'?p.z/.3048:p.z)} ${units.altitude==='ft'?'ft':'м'}`));
+  label(runway(-420,35),'Взлёт / посадка · одна точка','#89dbbe');
+  const state=plan.sample(time);helicopter(state,now);
+  $('alt').textContent=(units.altitude==='ft'?state.z/.3048:state.z).toFixed(0)+' '+(units.altitude==='ft'?'ft':'м');
+  $('speed').textContent=(units.speed==='kt'?state.speed/1.852:state.speed).toFixed(1)+' '+(units.speed==='kt'?'kt':'км/ч');
+  $('heading').textContent=String(Math.round(state.course)%360).padStart(3,'0')+'°';$('vertical').textContent=(units.vertical==='fpm'?state.vz*60/.3048:state.vz).toFixed(units.vertical==='fpm'?0:1)+' '+(units.vertical==='fpm'?'ft/min':'м/с');$('bank').textContent=state.bank.toFixed(1)+'°';$('phase').textContent=time>=plan.total?'Посадка · исходная точка ВПП':state.name;$('remaining').textContent=fmt(plan.total-time);$('clock').textContent=fmt(time)+' / '+fmt(plan.total);$('timeline').value=String(time);
+ }
+ function frame(now){if(last!==null&&playing){time=Math.min(plan.total,time+(now-last)/1000*Number($('rate').value));if(time>=plan.total){playing=false;$('pause').textContent='▶ Продолжить';}}last=now;draw(now);requestAnimationFrame(frame);}requestAnimationFrame(frame);
+ $('pause').onclick=()=>{if(time>=plan.total)time=0;playing=!playing;$('pause').textContent=playing?'❚❚ Пауза':'▶ Продолжить';};$('restart').onclick=()=>{time=0;playing=true;$('pause').textContent='❚❚ Пауза';};$('timeline').oninput=()=>{time=Number($('timeline').value);};
+ $('view').onclick=()=>{top=!top;pitch=top?1.50:.76;$('view').textContent=top?'Перспектива':'Вид сверху';};
+ canvas.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);};canvas.onpointermove=e=>{if(!drag)return;yaw-=(e.clientX-drag.x)*.007;pitch=Math.max(.18,Math.min(1.5,pitch+(e.clientY-drag.y)*.006));drag={x:e.clientX,y:e.clientY};};canvas.onpointerup=()=>drag=null;canvas.onpointercancel=()=>drag=null;canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.4,Math.min(2.7,zoom*Math.exp(-e.deltaY*.001)));},{passive:false});
+ document.addEventListener('visibilitychange',()=>{last=null;});
+}
+</script></body></html>
